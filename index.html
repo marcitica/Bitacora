@@ -48,6 +48,12 @@
 
       <button type="button" onclick="agregarRegistro()">Agregar Día</button>
       <button type="button" onclick="imprimirBitacora()">Imprimir Bitácora y PDF</button>
+      <button type="button" onclick="guardarBitacora(true)">Guardar</button>
+      <button type="button" onclick="salir()">Salir</button>
+      <button type="button" onclick="exportarBitacora()">Exportar JSON</button>
+      <input type="file" id="importFile" accept="application/json" style="display:none" onchange="importarBitacora(this.files[0])">
+      <button type="button" onclick="document.getElementById('importFile').click()">Importar JSON</button>
+
     </form>
   </div>
 
@@ -73,7 +79,8 @@
     "Pasos Rizo Luciana": "25Lu@",
     "Ramírez Villalobos Roberth Gerardo": "25Toto@",
     "Ruiz Gutiérrez Verónica": "25Vero@",
-    "Sáenz Sandoval Britany": "25Bri@"
+    "Sáenz Sandoval Britany": "25Bri@",
+    "Eulleny Hernández Briceño": "25Eulleny@",
   };
 
   let contador = 0;
@@ -96,6 +103,9 @@
     document.getElementById('login').style.display = 'none';
     document.getElementById('contenido').style.display = 'block';
     document.getElementById('nombreMostrar').textContent = nombre;
+
+    activarAutosave();   // <—— NUEVO
+    loadBitacora();
   }
 
   function cambiarPassword() {
@@ -119,6 +129,7 @@
     `;
     registrosDiv.appendChild(div);
   }
+
 
   function calcularHoras(i) {
     const entrada = document.getElementById('entrada'+i).value;
@@ -153,8 +164,144 @@
     for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
     return out;
   }
+// ====== PERSISTENCIA LOCAL ======
+const STORAGE_NS = 'bitacora2025';
+
+function storageKey() {
+  return `${STORAGE_NS}:${usuarioActual || 'anon'}`;
+}
+
+function snapshotBitacora() {
+  const data = {
+    estudiante: usuarioActual || '',
+    especialidad: document.getElementById('especialidad').value || '',
+    empresa: document.getElementById('empresa').value || '',
+    departamento: document.getElementById('departamento').value || '',
+    direccion: document.getElementById('direccion').value || '',
+    periodo: document.getElementById('periodo').value || '',
+    registros: []
+  };
+  for (let i = 1; i <= contador; i++) {
+    data.registros.push({
+      fecha: document.getElementById('fecha'+i)?.value || '',
+      tarea: document.getElementById('tarea'+i)?.value || '',
+      entrada: document.getElementById('entrada'+i)?.value || '',
+      salida: document.getElementById('salida'+i)?.value || '',
+      total: document.getElementById('total'+i)?.value || '',
+      firma: document.getElementById('firma'+i)?.value || '',
+    });
+  }
+  return data;
+}
+
+function saveBitacora() {
+  localStorage.setItem(storageKey(), JSON.stringify(snapshotBitacora()));
+}
+
+function restoreBitacora(data) {
+  document.getElementById('especialidad').value = data.especialidad || '';
+  document.getElementById('empresa').value = data.empresa || '';
+  document.getElementById('departamento').value = data.departamento || '';
+  document.getElementById('direccion').value = data.direccion || '';
+  document.getElementById('periodo').value = data.periodo || '';
+
+  document.getElementById('registros').innerHTML = '';
+  contador = 0;
+  (data.registros || []).forEach(r => {
+    agregarRegistro();
+    const i = contador;
+    document.getElementById('fecha'+i).value   = r.fecha || '';
+    document.getElementById('tarea'+i).value   = r.tarea || '';
+    document.getElementById('entrada'+i).value = r.entrada || '';
+    document.getElementById('salida'+i).value  = r.salida || '';
+    document.getElementById('total'+i).value   = r.total || '';
+    document.getElementById('firma'+i).value   = r.firma || '';
+  });
+}
+
+function loadBitacora() {
+  const raw = localStorage.getItem(storageKey());
+  if (!raw) return;
+  try { restoreBitacora(JSON.parse(raw)); } catch {}
+}
+
+function debounce(fn, delay = 400) {
+  let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn.apply(this, a), delay); };
+}
+const autoSave = debounce(() => saveBitacora(), 400);
+
+function activarAutosave() {
+  const form = document.getElementById('bitacoraForm');
+  form.removeEventListener('input', autoSave);
+  form.addEventListener('input', autoSave);
+}
+
+// Guarda manual (muestra aviso) o silencioso
+function guardarBitacora(mostrarAviso = false) {
+  try {
+    // usa la función saveBitacora() que ya agregamos para localStorage
+    if (typeof saveBitacora === 'function') {
+      saveBitacora();
+    }
+    if (mostrarAviso) alert('Datos guardados correctamente.');
+  } catch (e) {
+    console.error(e);
+    if (mostrarAviso) alert('No se pudieron guardar los datos.');
+  }
+}
+
+// Cerrar sesión (guarda y limpia la vista)
+function salir() {
+  // guarda rápido antes de salir (por si acaso)
+  if (typeof saveBitacora === 'function' && usuarioActual) {
+    try { saveBitacora(); } catch {}
+  }
+
+  // apagar autosave si lo tenías activo
+  try {
+    const form = document.getElementById('bitacoraForm');
+    if (form && typeof autoSave === 'function') form.removeEventListener('input', autoSave);
+  } catch {}
+
+  // limpiar UI/formulario
+  document.getElementById('bitacoraForm').reset();
+  document.getElementById('registros').innerHTML = '';
+  contador = 0;
+
+  // volver a la pantalla de login
+  document.getElementById('contenido').style.display = 'none';
+  document.getElementById('login').style.display = 'block';
+  document.getElementById('loginPassword').value = '';
+
+  // limpiar usuario
+  usuarioActual = null;
+
+  alert('Sesión cerrada. Los datos quedaron guardados en este navegador.');
+}
+
+// (Opcional) utilidades:
+
+function exportarBitacora() {
+  const blob = new Blob([JSON.stringify(snapshotBitacora(), null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `bitacora-${(usuarioActual||'alumno')}.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+function importarBitacora(file) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    try { restoreBitacora(JSON.parse(reader.result)); saveBitacora(); alert('Datos importados.'); }
+    catch { alert('Archivo inválido.'); }
+  };
+  reader.readAsText(file);
+}
+// ====== FIN PERSISTENCIA ======
+
 
   function imprimirBitacora() {
+    saveBitacora(); 
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'letter' });
 
